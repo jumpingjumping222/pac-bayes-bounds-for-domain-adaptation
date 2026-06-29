@@ -254,6 +254,7 @@ def plot_universal_quadrant_success(
     group_cols: Optional[list[str]] = None,
     theory_col: str = "theory",
     heston_name: str = "HESTON",
+    bs_name: str = "BS",
     ncols: int = 2,
     figsize: tuple[float, float] = (14.0, 13.0),
     label_points: bool = True,
