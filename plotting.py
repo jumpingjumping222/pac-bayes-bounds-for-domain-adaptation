@@ -23,6 +23,15 @@ DEFAULT_SELECTION_CRITERION_NAMES = {
     "logdet_A_subsample_mean": "Region width",
 }
 
+DEFAULT_BUCKET_COLORS = [
+    "#6671F4",
+    "#DC5E44",
+    "#5FC998",
+    "#A169F4",
+    "#F1A464",
+    "#66D1F0",
+]
+
 
 def _ensure_dir(save_dir):
     save_dir = Path(save_dir)
@@ -257,8 +266,11 @@ def plot_universal_quadrant_success(
     bs_name: str = "BS",
     ncols: int = 2,
     figsize: tuple[float, float] = (14.0, 13.0),
-    label_points: bool = True,
+    label_points: bool = False,
     point_label_col: str = "holdout_seed",
+    background: str = "#E6ECF5",
+    point_colors: Optional[list[str]] = None,
+    color_col: str = "maturity_bucket",
     save_dir=DEFAULT_FIGURE_DIR,
     filename: Optional[str] = None,
     show: bool = True,
@@ -273,6 +285,7 @@ def plot_universal_quadrant_success(
         selection_cols = list(selection_names.keys())
     if len(selection_cols) == 0:
         raise ValueError("selection_cols must contain at least one column.")
+    point_colors = DEFAULT_BUCKET_COLORS if point_colors is None else point_colors
 
     value_cols = [*selection_cols, oos_metric]
     diff_df = _heston_minus_bs_wide(
@@ -288,6 +301,7 @@ def plot_universal_quadrant_success(
     n_panels = len(selection_cols)
     nrows = int(np.ceil(n_panels / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    fig.patch.set_facecolor(background)
     axes_flat = axes.reshape(-1)
     oos_diff_col = f"{oos_metric}_diff"
 
@@ -296,9 +310,12 @@ def plot_universal_quadrant_success(
         if criterion_diff_col not in diff_df.columns:
             raise ValueError(f"Missing computed diff column: {criterion_diff_col}")
 
-        panel_df = diff_df[[criterion_diff_col, oos_diff_col]].copy()
+        keep_cols = [criterion_diff_col, oos_diff_col]
         if point_label_col in diff_df.columns:
-            panel_df[point_label_col] = diff_df[point_label_col].to_numpy()
+            keep_cols.append(point_label_col)
+        if color_col in diff_df.columns:
+            keep_cols.append(color_col)
+        panel_df = diff_df[keep_cols].copy()
         panel_df = panel_df.replace([np.inf, -np.inf], np.nan).dropna(
             subset=[criterion_diff_col, oos_diff_col]
         )
@@ -307,8 +324,21 @@ def plot_universal_quadrant_success(
         y = panel_df[oos_diff_col].to_numpy(dtype=float)
         success = np.sign(x) == np.sign(y)
         success_rate = float(np.mean(success)) if len(success) else np.nan
-        colors = np.where(success, "#2ca02c", "#d62728")
 
+        if color_col in panel_df.columns:
+            color_values = panel_df[color_col].astype(str)
+            color_order = list(dict.fromkeys(color_values.to_list()))
+            color_map = {
+                value: point_colors[i % len(point_colors)]
+                for i, value in enumerate(color_order)
+            }
+            colors = color_values.map(color_map).to_numpy()
+        else:
+            color_order = []
+            color_map = {}
+            colors = point_colors[0]
+
+        ax.set_facecolor(background)
         ax.scatter(
             x,
             y,
@@ -320,12 +350,14 @@ def plot_universal_quadrant_success(
         )
         ax.axhline(0.0, color="#6f6f6f", linewidth=0.9, linestyle="--")
         ax.axvline(0.0, color="#6f6f6f", linewidth=0.9, linestyle="--")
-        ax.grid(True, linewidth=0.5, alpha=0.3)
+        ax.grid(True, linewidth=0.6, alpha=0.38, color="white")
 
         label = selection_names.get(selection_col, selection_col)
         ax.set_title(label, fontsize=11)
         ax.set_xlabel(f"{label}: HESTON - BS")
         ax.set_ylabel(f"{oos_metric}: HESTON - BS")
+        for spine in ax.spines.values():
+            spine.set_color("white")
 
         if np.isfinite(success_rate):
             ax.text(
@@ -354,6 +386,23 @@ def plot_universal_quadrant_success(
                     fontsize=7,
                     color="#303030",
                 )
+
+        if len(color_order) > 1:
+            handles = [
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    linestyle="",
+                    markerfacecolor=color_map[value],
+                    markeredgecolor="white",
+                    markeredgewidth=0.6,
+                    markersize=6,
+                    label=value,
+                )
+                for value in color_order
+            ]
+            ax.legend(handles=handles, frameon=False, fontsize=7, loc="lower right")
 
     for ax in axes_flat[n_panels:]:
         ax.set_visible(False)
