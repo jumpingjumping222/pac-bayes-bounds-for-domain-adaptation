@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -7,6 +7,21 @@ import matplotlib.pyplot as plt
 
 
 DEFAULT_FIGURE_DIR = Path("outputs") / "figures"
+
+
+DEFAULT_SELECTION_CRITERION_NAMES = {
+    "pac_score": "Pac-score",
+    "best_val": "Best-val",
+    "expected_train_nll_subsample_mean": (
+        r"$n\mathbb E_{\mathbf w\sim Q_k^*}"
+        r"\widehat L_k^{\mathrm{nll}}(\mathbf w)$"
+    ),
+    "kl_subsample_mean": "KL",
+    "posterior_mean_sse_subsample_mean": "Fitness",
+    "posterior_cov_sse_subsample_mean": "Flatness",
+    "theta_diff_sq_subsample_mean": "Adaptation",
+    "logdet_A_subsample_mean": "Region width",
+}
 
 
 def _ensure_dir(save_dir):
@@ -28,6 +43,206 @@ def _save_and_maybe_show(fig, save_path: Path, show: bool = True, dpi: int = 300
         plt.show()
     else:
         plt.close(fig)
+
+
+def _load_frame(data) -> pd.DataFrame:
+    if isinstance(data, (str, Path)):
+        return pd.read_csv(data)
+    return data.copy()
+
+
+def _auto_group_cols(df: pd.DataFrame) -> list[str]:
+    candidates = [
+        "holdout_seed",
+        "seed",
+        "method",
+        "maturity_bucket",
+        "test_start_date",
+    ]
+    return [col for col in candidates if col in df.columns]
+
+
+def _heston_minus_bs_wide(
+    data,
+    value_cols: Iterable[str],
+    bucket: Optional[str] = "all",
+    group_cols: Optional[list[str]] = None,
+    theory_col: str = "theory",
+    heston_name: str = "HESTON",
+    bs_name: str = "BS",
+) -> pd.DataFrame:
+    df = _load_frame(data)
+    value_cols = list(value_cols)
+    required = [theory_col, *value_cols]
+    missing = sorted(set(required) - set(df.columns))
+    if missing:
+        raise ValueError(f"Data is missing required columns: {missing}")
+
+    if bucket is not None:
+        if "maturity_bucket" not in df.columns:
+            raise ValueError("bucket filtering requires a 'maturity_bucket' column.")
+        df = df.loc[df["maturity_bucket"].astype(str).eq(str(bucket))].copy()
+
+    if df.empty:
+        raise ValueError("No rows remain after filtering.")
+
+    df[theory_col] = df[theory_col].astype(str).str.upper()
+    heston_name = str(heston_name).upper()
+    bs_name = str(bs_name).upper()
+    df = df.loc[df[theory_col].isin([heston_name, bs_name])].copy()
+
+    if group_cols is None:
+        group_cols = _auto_group_cols(df)
+    group_cols = [col for col in group_cols if col in df.columns and col != theory_col]
+
+    id_cols = [*group_cols, theory_col]
+    compact = (
+        df[id_cols + value_cols]
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna(subset=value_cols, how="all")
+        .groupby(id_cols, as_index=False)
+        .first()
+    )
+    wide = compact.pivot(index=group_cols, columns=theory_col, values=value_cols)
+    if heston_name not in wide.columns.get_level_values(1):
+        raise ValueError(f"No rows found for theory={heston_name!r}.")
+    if bs_name not in wide.columns.get_level_values(1):
+        raise ValueError(f"No rows found for theory={bs_name!r}.")
+
+    out = wide.index.to_frame(index=False)
+    for col in value_cols:
+        out[f"{col}_heston"] = wide[(col, heston_name)].to_numpy()
+        out[f"{col}_bs"] = wide[(col, bs_name)].to_numpy()
+        out[f"{col}_diff"] = out[f"{col}_heston"] - out[f"{col}_bs"]
+
+    sort_cols = [col for col in ["holdout_seed", "seed", "method", "maturity_bucket"] if col in out.columns]
+    if sort_cols:
+        out = out.sort_values(sort_cols).reset_index(drop=True)
+    return out
+
+
+def plot_universal_overall_metric_differences(
+    aligned_summary,
+    oos_metric: str = "test_bsiv_median",
+    selection_cols: Optional[list[str]] = None,
+    selection_names: Optional[dict[str, str]] = None,
+    bucket: str = "all",
+    group_cols: Optional[list[str]] = None,
+    theory_col: str = "theory",
+    heston_name: str = "HESTON",
+    bs_name: str = "BS",
+    ncols: int = 2,
+    figsize: tuple[float, float] = (14.0, 13.0),
+    annotate_values: bool = False,
+    save_dir=DEFAULT_FIGURE_DIR,
+    filename: Optional[str] = None,
+    show: bool = True,
+    dpi: int = 300,
+):
+    selection_names = (
+        DEFAULT_SELECTION_CRITERION_NAMES
+        if selection_names is None
+        else selection_names
+    )
+    if selection_cols is None:
+        selection_cols = list(selection_names.keys())
+    if len(selection_cols) == 0:
+        raise ValueError("selection_cols must contain at least one column.")
+
+    value_cols = [*selection_cols, oos_metric]
+    diff_df = _heston_minus_bs_wide(
+        aligned_summary,
+        value_cols=value_cols,
+        bucket=bucket,
+        group_cols=group_cols,
+        theory_col=theory_col,
+        heston_name=heston_name,
+        bs_name=bs_name,
+    )
+
+    x_col = "holdout_seed" if "holdout_seed" in diff_df.columns else diff_df.index.name
+    if x_col is None:
+        x = np.arange(len(diff_df))
+        x_label = "Index"
+    else:
+        x = diff_df[x_col].to_numpy()
+        x_label = x_col
+
+    n_panels = len(selection_cols)
+    nrows = int(np.ceil(n_panels / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    axes_flat = axes.reshape(-1)
+    oos_diff_col = f"{oos_metric}_diff"
+
+    for ax, selection_col in zip(axes_flat, selection_cols):
+        criterion_diff_col = f"{selection_col}_diff"
+        if criterion_diff_col not in diff_df.columns:
+            raise ValueError(f"Missing computed diff column: {criterion_diff_col}")
+
+        label = selection_names.get(selection_col, selection_col)
+        y_left = diff_df[criterion_diff_col].to_numpy(dtype=float)
+        y_right = diff_df[oos_diff_col].to_numpy(dtype=float)
+
+        left_line = ax.plot(
+            x,
+            y_left,
+            marker="o",
+            linewidth=1.8,
+            color="#1f77b4",
+            label=f"{label} diff",
+        )[0]
+        ax.axhline(0.0, color="#6f6f6f", linewidth=0.9, linestyle="--")
+        ax.set_title(label, fontsize=11)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(f"{label}: HESTON - BS", color=left_line.get_color())
+        ax.tick_params(axis="y", labelcolor=left_line.get_color())
+        ax.grid(True, axis="y", linewidth=0.5, alpha=0.35)
+
+        ax_right = ax.twinx()
+        right_line = ax_right.plot(
+            x,
+            y_right,
+            marker="s",
+            linewidth=1.6,
+            color="#d62728",
+            label=f"{oos_metric} diff",
+        )[0]
+        ax_right.axhline(0.0, color="#6f6f6f", linewidth=0.9, linestyle=":")
+        ax_right.set_ylabel(f"{oos_metric}: HESTON - BS", color=right_line.get_color())
+        ax_right.tick_params(axis="y", labelcolor=right_line.get_color())
+
+        if annotate_values:
+            for xi, yi in zip(x, y_left):
+                if np.isfinite(yi):
+                    ax.annotate(f"{yi:.3g}", (xi, yi), textcoords="offset points", xytext=(0, 5),
+                                ha="center", fontsize=7, color=left_line.get_color())
+            for xi, yi in zip(x, y_right):
+                if np.isfinite(yi):
+                    ax_right.annotate(f"{yi:.3g}", (xi, yi), textcoords="offset points", xytext=(0, -10),
+                                      ha="center", fontsize=7, color=right_line.get_color())
+
+        ax.legend([left_line, right_line], [left_line.get_label(), right_line.get_label()],
+                  frameon=False, fontsize=8, loc="best")
+
+    for ax in axes_flat[n_panels:]:
+        ax.set_visible(False)
+
+    title = (
+        f"Overall HESTON - BS differences, bucket={bucket}, "
+        f"OOS metric={oos_metric}"
+    )
+    fig.suptitle(title, fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+    if filename is None:
+        filename = f"universal_overall_diff_{oos_metric}.png"
+    if save_dir is not None:
+        save_dir = _ensure_dir(save_dir)
+        _save_and_maybe_show(fig, save_dir / filename, show=show, dpi=dpi)
+    elif show:
+        plt.show()
+
+    return fig, diff_df
 
 
 def plot_bounds(
