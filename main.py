@@ -12,7 +12,10 @@ from pactran_blr_score import (
     run_rolling_pactran_blr_scores,
 )
 from pretrain import run_all_theory_pretrains
-from repeated_random_holdout import run_repeated_random_holdout_experiments
+from repeated_random_holdout import (
+    run_repeated_random_holdout_experiments,
+    run_repeated_random_holdout_universal_experiments,
+)
 
 
 # ========= Data preparation
@@ -44,6 +47,7 @@ ROLLING_STEP_DAYS = 20
 
 # ========= Repeated random holdout OOS setting
 RUN_REPEATED_RANDOM_HOLDOUT = True
+REPEATED_RANDOM_HOLDOUT_UNIVERSAL = True
 HOLDOUT_TRAIN_SIZE = 10_0
 HOLDOUT_TEST_SIZE = 5_0
 HOLDOUT_BUCKET_TYPE = "maturity"  # options: "maturity", "delta"
@@ -111,6 +115,7 @@ def save_config() -> None:
         "rolling_test_days": ROLLING_TEST_DAYS,
         "rolling_step_days": ROLLING_STEP_DAYS,
         "run_repeated_random_holdout": RUN_REPEATED_RANDOM_HOLDOUT,
+        "repeated_random_holdout_universal": REPEATED_RANDOM_HOLDOUT_UNIVERSAL,
         "holdout_train_size": HOLDOUT_TRAIN_SIZE,
         "holdout_test_size": HOLDOUT_TEST_SIZE,
         "holdout_bucket_type": HOLDOUT_BUCKET_TYPE,
@@ -280,10 +285,20 @@ def run_rolling_oos(heston_dataset, specs):
 
 
 def run_repeated_random_holdout_oos(heston_dataset, specs):
-    run_repeated_random_holdout_experiments(
+    runner = (
+        run_repeated_random_holdout_universal_experiments
+        if REPEATED_RANDOM_HOLDOUT_UNIVERSAL
+        else run_repeated_random_holdout_experiments
+    )
+    output_name = (
+        "repeated_random_holdout_universal"
+        if REPEATED_RANDOM_HOLDOUT_UNIVERSAL
+        else "repeated_random_holdout"
+    )
+    runner(
         heston_dataset=heston_dataset,
         checkpoint_specs=specs,
-        output_root=EXPERIMENT_DIR / "repeated_random_holdout",
+        output_root=EXPERIMENT_DIR / output_name,
         bs_checkpoint_path=BS_PRETRAIN_CHECKPOINT_PATH,
         heston_checkpoint_path=HESTON_PRETRAIN_CHECKPOINT_PATH,
         seeds=SEEDS,
