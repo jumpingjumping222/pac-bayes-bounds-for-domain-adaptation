@@ -245,6 +245,137 @@ def plot_universal_overall_metric_differences(
     return fig, diff_df
 
 
+def plot_universal_quadrant_success(
+    aligned_summary,
+    oos_metric: str = "test_bsiv_median",
+    selection_cols: Optional[list[str]] = None,
+    selection_names: Optional[dict[str, str]] = None,
+    bucket: Optional[str] = "all",
+    group_cols: Optional[list[str]] = None,
+    theory_col: str = "theory",
+    heston_name: str = "HESTON",
+    ncols: int = 2,
+    figsize: tuple[float, float] = (14.0, 13.0),
+    label_points: bool = True,
+    point_label_col: str = "holdout_seed",
+    save_dir=DEFAULT_FIGURE_DIR,
+    filename: Optional[str] = None,
+    show: bool = True,
+    dpi: int = 300,
+):
+    selection_names = (
+        DEFAULT_SELECTION_CRITERION_NAMES
+        if selection_names is None
+        else selection_names
+    )
+    if selection_cols is None:
+        selection_cols = list(selection_names.keys())
+    if len(selection_cols) == 0:
+        raise ValueError("selection_cols must contain at least one column.")
+
+    value_cols = [*selection_cols, oos_metric]
+    diff_df = _heston_minus_bs_wide(
+        aligned_summary,
+        value_cols=value_cols,
+        bucket=bucket,
+        group_cols=group_cols,
+        theory_col=theory_col,
+        heston_name=heston_name,
+        bs_name=bs_name,
+    )
+
+    n_panels = len(selection_cols)
+    nrows = int(np.ceil(n_panels / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, squeeze=False)
+    axes_flat = axes.reshape(-1)
+    oos_diff_col = f"{oos_metric}_diff"
+
+    for ax, selection_col in zip(axes_flat, selection_cols):
+        criterion_diff_col = f"{selection_col}_diff"
+        if criterion_diff_col not in diff_df.columns:
+            raise ValueError(f"Missing computed diff column: {criterion_diff_col}")
+
+        panel_df = diff_df[[criterion_diff_col, oos_diff_col]].copy()
+        if point_label_col in diff_df.columns:
+            panel_df[point_label_col] = diff_df[point_label_col].to_numpy()
+        panel_df = panel_df.replace([np.inf, -np.inf], np.nan).dropna(
+            subset=[criterion_diff_col, oos_diff_col]
+        )
+
+        x = panel_df[criterion_diff_col].to_numpy(dtype=float)
+        y = panel_df[oos_diff_col].to_numpy(dtype=float)
+        success = np.sign(x) == np.sign(y)
+        success_rate = float(np.mean(success)) if len(success) else np.nan
+        colors = np.where(success, "#2ca02c", "#d62728")
+
+        ax.scatter(
+            x,
+            y,
+            c=colors,
+            s=42,
+            alpha=0.88,
+            edgecolors="white",
+            linewidths=0.6,
+        )
+        ax.axhline(0.0, color="#6f6f6f", linewidth=0.9, linestyle="--")
+        ax.axvline(0.0, color="#6f6f6f", linewidth=0.9, linestyle="--")
+        ax.grid(True, linewidth=0.5, alpha=0.3)
+
+        label = selection_names.get(selection_col, selection_col)
+        ax.set_title(label, fontsize=11)
+        ax.set_xlabel(f"{label}: HESTON - BS")
+        ax.set_ylabel(f"{oos_metric}: HESTON - BS")
+
+        if np.isfinite(success_rate):
+            ax.text(
+                0.98,
+                0.98,
+                f"success rate = {success_rate:.1%}",
+                transform=ax.transAxes,
+                ha="right",
+                va="top",
+                fontsize=9,
+                bbox={
+                    "boxstyle": "round,pad=0.25",
+                    "facecolor": "white",
+                    "edgecolor": "#d0d0d0",
+                    "alpha": 0.9,
+                },
+            )
+
+        if label_points and point_label_col in panel_df.columns:
+            for _, row in panel_df.iterrows():
+                ax.annotate(
+                    str(row[point_label_col]),
+                    (row[criterion_diff_col], row[oos_diff_col]),
+                    textcoords="offset points",
+                    xytext=(4, 4),
+                    fontsize=7,
+                    color="#303030",
+                )
+
+    for ax in axes_flat[n_panels:]:
+        ax.set_visible(False)
+
+    bucket_label = "all buckets" if bucket is None else f"bucket={bucket}"
+    fig.suptitle(
+        f"Quadrant success: {bucket_label}, OOS metric={oos_metric}",
+        fontsize=13,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+    if filename is None:
+        bucket_name = "all_buckets" if bucket is None else str(bucket).replace("/", "-")
+        filename = f"universal_quadrant_success_{bucket_name}_{oos_metric}.png"
+    if save_dir is not None:
+        save_dir = _ensure_dir(save_dir)
+        _save_and_maybe_show(fig, save_dir / filename, show=show, dpi=dpi)
+    elif show:
+        plt.show()
+
+    return fig, diff_df
+
+
 def plot_bounds(
     results_df: pd.DataFrame,
     save_dir=DEFAULT_FIGURE_DIR,
