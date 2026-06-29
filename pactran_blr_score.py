@@ -1033,6 +1033,8 @@ def align_pactran_finetune(
     )
     columns = [
         "holdout_seed",
+        "draw_seed",
+        "retry_idx",
         "bucket_type",
         "train_scope",
         "test_start_date",

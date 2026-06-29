@@ -106,6 +106,16 @@ def _date_str(value) -> str:
     return pd.Timestamp(value).strftime("%Y-%m-%d")
 
 
+def _retry_draw_seed(holdout_seed: int, retry_idx: int) -> int:
+    if retry_idx == 0:
+        return int(holdout_seed)
+    max_seed = np.iinfo(np.int32).max
+    return int(
+        ((int(holdout_seed) + 1) * 1_000_003 + int(retry_idx) * 9_176)
+        % max_seed
+    )
+
+
 def _sample_temporal_holdout(
     bucket_df: pd.DataFrame,
     bucket_label: str,
@@ -156,7 +166,9 @@ def _sample_temporal_holdout(
 def _sample_universal_temporal_holdout(
     data: pd.DataFrame,
     bucket_labels: list[str],
-    seed: int,
+    holdout_seed: int,
+    draw_seed: int,
+    retry_idx: int,
     train_size: int,
     test_size: int,
     bucket_type: str,
@@ -164,7 +176,7 @@ def _sample_universal_temporal_holdout(
     if train_size <= 0 or test_size <= 0:
         raise ValueError("train_size and test_size must be positive.")
 
-    rng = np.random.default_rng(int(seed))
+    rng = np.random.default_rng(int(draw_seed))
     train_frames = []
     test_frames = []
     bucket_rows = []
@@ -213,7 +225,9 @@ def _sample_universal_temporal_holdout(
         test_frames.append(test_sample)
         bucket_rows.append(
             {
-                "holdout_seed": int(seed),
+                "holdout_seed": int(holdout_seed),
+                "draw_seed": int(draw_seed),
+                "retry_idx": int(retry_idx),
                 "bucket_type": str(bucket_type).lower(),
                 "train_scope": "universal",
                 "maturity_bucket": str(bucket_label),
@@ -239,7 +253,9 @@ def _sample_universal_temporal_holdout(
         raise ValueError("Temporal leakage: universal train dates must be before test dates.")
 
     metadata = {
-        "holdout_seed": int(seed),
+        "holdout_seed": int(holdout_seed),
+        "draw_seed": int(draw_seed),
+        "retry_idx": int(retry_idx),
         "bucket_type": str(bucket_type).lower(),
         "train_scope": "universal",
         "train_start_date": _date_str(train_val["date"].min()),
@@ -1196,9 +1212,13 @@ def run_repeated_random_holdout_universal_experiments(
     pactran_subsample_frac: Optional[float] = None,
     pactran_n_subsamples: int = 5,
     pactran_subsample_seed: int = 123,
+    max_holdout_retries: int = 1000,
     maturity_bins: Optional[list[float]] = None,
     maturity_labels: Optional[list[str]] = None,
 ) -> pd.DataFrame:
+    if max_holdout_retries <= 0:
+        raise ValueError("max_holdout_retries must be positive.")
+
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     data, bucket_labels = _prepare_holdout_data(
@@ -1218,19 +1238,36 @@ def run_repeated_random_holdout_universal_experiments(
         posterior_dir = seed_dir / "pactran" / "posteriors"
         aligned_csv = seed_dir / "aligned" / "pactran_finetune_aligned.csv"
 
-        try:
-            split = _sample_universal_temporal_holdout(
-                data=data,
-                bucket_labels=bucket_labels,
-                seed=seed,
-                train_size=train_size,
-                test_size=test_size,
-                bucket_type=bucket_type,
-            )
-            split_rows.extend(split["bucket_rows"])
-        except Exception as exc:
-            message = f"[universal holdout seed={seed}] split failed: {exc}"
-            print(message)
+        split = None
+        last_error = None
+        for retry_idx in range(int(max_holdout_retries)):
+            draw_seed = _retry_draw_seed(seed, retry_idx)
+            try:
+                split = _sample_universal_temporal_holdout(
+                    data=data,
+                    bucket_labels=bucket_labels,
+                    holdout_seed=seed,
+                    draw_seed=draw_seed,
+                    retry_idx=retry_idx,
+                    train_size=train_size,
+                    test_size=test_size,
+                    bucket_type=bucket_type,
+                )
+                if retry_idx > 0:
+                    print(
+                        f"[universal holdout seed={seed}] split succeeded "
+                        f"after retry_idx={retry_idx} draw_seed={draw_seed}"
+                    )
+                split_rows.extend(split["bucket_rows"])
+                break
+            except Exception as exc:
+                last_error = exc
+                print(
+                    f"[universal holdout seed={seed}] split attempt failed: "
+                    f"retry_idx={retry_idx} draw_seed={draw_seed} error={exc}"
+                )
+
+        if split is None:
             split_rows.append(
                 {
                     "holdout_seed": seed,
@@ -1238,11 +1275,17 @@ def run_repeated_random_holdout_universal_experiments(
                     "train_scope": "universal",
                     "maturity_bucket": "all",
                     "status": "failed",
-                    "error_message": str(exc),
+                    "error_message": (
+                        f"Failed to sample universal split after "
+                        f"{max_holdout_retries} retries. Last error: {last_error}"
+                    ),
                 }
             )
             pd.DataFrame(split_rows).to_csv(output_root / "splits.csv", index=False)
-            continue
+            raise RuntimeError(
+                f"Failed to sample universal split for holdout_seed={seed} "
+                f"after {max_holdout_retries} retries. Last error: {last_error}"
+            )
 
         pd.DataFrame(split_rows).to_csv(output_root / "splits.csv", index=False)
 

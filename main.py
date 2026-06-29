@@ -51,6 +51,7 @@ REPEATED_RANDOM_HOLDOUT_UNIVERSAL = True
 HOLDOUT_TRAIN_SIZE = 10_0
 HOLDOUT_TEST_SIZE = 5_0
 HOLDOUT_BUCKET_TYPE = "maturity"  # options: "maturity", "delta"
+MAX_HOLDOUT_RETRIES = 1000
 
 # ========= Model / finetune setting
 SEEDS = list(range(10))
@@ -119,6 +120,7 @@ def save_config() -> None:
         "holdout_train_size": HOLDOUT_TRAIN_SIZE,
         "holdout_test_size": HOLDOUT_TEST_SIZE,
         "holdout_bucket_type": HOLDOUT_BUCKET_TYPE,
+        "max_holdout_retries": MAX_HOLDOUT_RETRIES,
         "seeds": SEEDS,
         "run_theories": RUN_THEORIES,
         "run_methods": RUN_METHODS,
@@ -285,45 +287,46 @@ def run_rolling_oos(heston_dataset, specs):
 
 
 def run_repeated_random_holdout_oos(heston_dataset, specs):
-    runner = (
-        run_repeated_random_holdout_universal_experiments
-        if REPEATED_RANDOM_HOLDOUT_UNIVERSAL
-        else run_repeated_random_holdout_experiments
-    )
-    output_name = (
-        "repeated_random_holdout_universal"
-        if REPEATED_RANDOM_HOLDOUT_UNIVERSAL
-        else "repeated_random_holdout"
-    )
-    runner(
-        heston_dataset=heston_dataset,
-        checkpoint_specs=specs,
-        output_root=EXPERIMENT_DIR / output_name,
-        bs_checkpoint_path=BS_PRETRAIN_CHECKPOINT_PATH,
-        heston_checkpoint_path=HESTON_PRETRAIN_CHECKPOINT_PATH,
-        seeds=SEEDS,
-        train_size=HOLDOUT_TRAIN_SIZE,
-        test_size=HOLDOUT_TEST_SIZE,
-        bucket_type=HOLDOUT_BUCKET_TYPE,
-        theories=RUN_THEORIES,
-        methods=RUN_METHODS,
-        val_ratio=FINETUNE_VAL_RATIO,
-        tl_lr=FINETUNE_TL_LR,
-        dl_lr=FINETUNE_DL_LR,
-        max_epochs=FINETUNE_MAX_EPOCHS,
-        early_stop_consecutive=FINETUNE_EARLY_STOP_CONSECUTIVE,
-        run_finetune=RUN_FINETUNE,
-        run_pactran_score=RUN_PACTRAN_SCORE,
-        pactran_target_col=PACTRAN_TARGET_COL,
-        pactran_sigma2=PACTRAN_SIGMA2,
-        pactran_sigma_pi2=PACTRAN_SIGMA_PI2,
-        pactran_prior_center=PACTRAN_PRIOR_CENTER,
-        pactran_subsample_size=PACTRAN_SUBSAMPLE_SIZE,
-        pactran_subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
-        pactran_n_subsamples=PACTRAN_N_SUBSAMPLES,
-        pactran_subsample_seed=PACTRAN_SUBSAMPLE_SEED,
-        maturity_bins=MATURITY_BINS,
-        maturity_labels=MATURITY_LABELS,
+    common_kwargs = {
+        "heston_dataset": heston_dataset,
+        "checkpoint_specs": specs,
+        "bs_checkpoint_path": BS_PRETRAIN_CHECKPOINT_PATH,
+        "heston_checkpoint_path": HESTON_PRETRAIN_CHECKPOINT_PATH,
+        "seeds": SEEDS,
+        "train_size": HOLDOUT_TRAIN_SIZE,
+        "test_size": HOLDOUT_TEST_SIZE,
+        "bucket_type": HOLDOUT_BUCKET_TYPE,
+        "theories": RUN_THEORIES,
+        "methods": RUN_METHODS,
+        "val_ratio": FINETUNE_VAL_RATIO,
+        "tl_lr": FINETUNE_TL_LR,
+        "dl_lr": FINETUNE_DL_LR,
+        "max_epochs": FINETUNE_MAX_EPOCHS,
+        "early_stop_consecutive": FINETUNE_EARLY_STOP_CONSECUTIVE,
+        "run_finetune": RUN_FINETUNE,
+        "run_pactran_score": RUN_PACTRAN_SCORE,
+        "pactran_target_col": PACTRAN_TARGET_COL,
+        "pactran_sigma2": PACTRAN_SIGMA2,
+        "pactran_sigma_pi2": PACTRAN_SIGMA_PI2,
+        "pactran_prior_center": PACTRAN_PRIOR_CENTER,
+        "pactran_subsample_size": PACTRAN_SUBSAMPLE_SIZE,
+        "pactran_subsample_frac": PACTRAN_SUBSAMPLE_FRAC,
+        "pactran_n_subsamples": PACTRAN_N_SUBSAMPLES,
+        "pactran_subsample_seed": PACTRAN_SUBSAMPLE_SEED,
+        "maturity_bins": MATURITY_BINS,
+        "maturity_labels": MATURITY_LABELS,
+    }
+    if REPEATED_RANDOM_HOLDOUT_UNIVERSAL:
+        run_repeated_random_holdout_universal_experiments(
+            **common_kwargs,
+            output_root=EXPERIMENT_DIR / "repeated_random_holdout_universal",
+            max_holdout_retries=MAX_HOLDOUT_RETRIES,
+        )
+        return
+
+    run_repeated_random_holdout_experiments(
+        **common_kwargs,
+        output_root=EXPERIMENT_DIR / "repeated_random_holdout",
     )
 
 
