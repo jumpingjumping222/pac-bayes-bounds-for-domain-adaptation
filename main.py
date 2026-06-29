@@ -52,6 +52,7 @@ HOLDOUT_TRAIN_SIZE = 10_0
 HOLDOUT_TEST_SIZE = 5_0
 HOLDOUT_BUCKET_TYPE = "maturity"  # options: "maturity", "delta"
 MAX_HOLDOUT_RETRIES = 1000
+HOLDOUT_SPLIT_DATE = None  # e.g. "2020-03-31"; None uses random train max date.
 
 # ========= Model / finetune setting
 SEEDS = list(range(10))
@@ -121,6 +122,7 @@ def save_config() -> None:
         "holdout_test_size": HOLDOUT_TEST_SIZE,
         "holdout_bucket_type": HOLDOUT_BUCKET_TYPE,
         "max_holdout_retries": MAX_HOLDOUT_RETRIES,
+        "holdout_split_date": HOLDOUT_SPLIT_DATE,
         "seeds": SEEDS,
         "run_theories": RUN_THEORIES,
         "run_methods": RUN_METHODS,
@@ -321,6 +323,7 @@ def run_repeated_random_holdout_oos(heston_dataset, specs):
             **common_kwargs,
             output_root=EXPERIMENT_DIR / "repeated_random_holdout_universal",
             max_holdout_retries=MAX_HOLDOUT_RETRIES,
+            holdout_split_date=HOLDOUT_SPLIT_DATE,
         )
         return
 

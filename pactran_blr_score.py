@@ -1037,6 +1037,8 @@ def align_pactran_finetune(
         "retry_idx",
         "bucket_type",
         "train_scope",
+        "split_date_mode",
+        "holdout_split_date",
         "test_start_date",
         "train_start_date",
         "train_end_date",

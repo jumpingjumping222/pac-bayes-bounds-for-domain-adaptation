@@ -172,6 +172,7 @@ def _sample_universal_temporal_holdout(
     train_size: int,
     test_size: int,
     bucket_type: str,
+    holdout_split_date: Optional[str] = None,
 ) -> dict:
     if train_size <= 0 or test_size <= 0:
         raise ValueError("train_size and test_size must be positive.")
@@ -180,18 +181,29 @@ def _sample_universal_temporal_holdout(
     train_frames = []
     test_frames = []
     bucket_rows = []
+    split_date = (
+        pd.Timestamp(holdout_split_date).normalize()
+        if holdout_split_date is not None
+        else None
+    )
+    split_date_mode = "fixed_date" if split_date is not None else "random_boundary"
 
     for bucket_label in bucket_labels:
         bucket_df = data.loc[
             data["maturity_bucket"].astype(str).eq(str(bucket_label))
         ].copy()
-        if len(bucket_df) < train_size:
+        train_pool = (
+            bucket_df.loc[bucket_df["_date"] <= split_date].copy()
+            if split_date is not None
+            else bucket_df
+        )
+        if len(train_pool) < train_size:
             raise ValueError(
                 f"Not enough train samples for bucket={bucket_label}: "
-                f"need {train_size}, got {len(bucket_df)}."
+                f"need {train_size}, got {len(train_pool)}."
             )
         train_random_state = int(rng.integers(0, np.iinfo(np.int32).max))
-        train_sample = bucket_df.sample(
+        train_sample = train_pool.sample(
             n=int(train_size),
             replace=False,
             random_state=train_random_state,
@@ -203,7 +215,7 @@ def _sample_universal_temporal_holdout(
         .sort_values(["date", "_holdout_source_index"])
         .reset_index(drop=True)
     )
-    global_train_end_date = train_val["_date"].max()
+    global_train_end_date = split_date if split_date is not None else train_val["_date"].max()
 
     for bucket_label, train_sample in zip(bucket_labels, train_frames):
         bucket_df = data.loc[
@@ -230,6 +242,10 @@ def _sample_universal_temporal_holdout(
                 "retry_idx": int(retry_idx),
                 "bucket_type": str(bucket_type).lower(),
                 "train_scope": "universal",
+                "split_date_mode": split_date_mode,
+                "holdout_split_date": (
+                    "" if split_date is None else _date_str(split_date)
+                ),
                 "maturity_bucket": str(bucket_label),
                 "train_start_date": _date_str(train_sample["date"].min()),
                 "train_end_date": _date_str(train_sample["date"].max()),
@@ -258,6 +274,8 @@ def _sample_universal_temporal_holdout(
         "retry_idx": int(retry_idx),
         "bucket_type": str(bucket_type).lower(),
         "train_scope": "universal",
+        "split_date_mode": split_date_mode,
+        "holdout_split_date": "" if split_date is None else _date_str(split_date),
         "train_start_date": _date_str(train_val["date"].min()),
         "train_end_date": _date_str(train_val["date"].max()),
         "global_train_start_date": _date_str(train_val["date"].min()),
@@ -1213,6 +1231,7 @@ def run_repeated_random_holdout_universal_experiments(
     pactran_n_subsamples: int = 5,
     pactran_subsample_seed: int = 123,
     max_holdout_retries: int = 1000,
+    holdout_split_date: Optional[str] = None,
     maturity_bins: Optional[list[float]] = None,
     maturity_labels: Optional[list[str]] = None,
 ) -> pd.DataFrame:
@@ -1252,6 +1271,7 @@ def run_repeated_random_holdout_universal_experiments(
                     train_size=train_size,
                     test_size=test_size,
                     bucket_type=bucket_type,
+                    holdout_split_date=holdout_split_date,
                 )
                 if retry_idx > 0:
                     print(
@@ -1273,6 +1293,10 @@ def run_repeated_random_holdout_universal_experiments(
                     "holdout_seed": seed,
                     "bucket_type": str(bucket_type).lower(),
                     "train_scope": "universal",
+                    "split_date_mode": (
+                        "fixed_date" if holdout_split_date is not None else "random_boundary"
+                    ),
+                    "holdout_split_date": "" if holdout_split_date is None else holdout_split_date,
                     "maturity_bucket": "all",
                     "status": "failed",
                     "error_message": (
