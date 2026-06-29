@@ -1288,6 +1288,7 @@ def run_repeated_random_holdout_universal_experiments(
             finetune_results=finetune_results,
             pactran_results=pactran_results,
             output_csv=aligned_csv,
+        )
         aligned_frames.append(aligned)
 
     if aligned_frames:
