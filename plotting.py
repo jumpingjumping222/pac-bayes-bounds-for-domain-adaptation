@@ -4,6 +4,7 @@ from typing import Dict, Iterable, Optional
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
 
 
 DEFAULT_FIGURE_DIR = Path("outputs") / "figures"
@@ -439,6 +440,10 @@ def plot_universal_absolute_level_panels(
     ncols: int = 2,
     figsize: tuple[float, float] = (15.0, 18.0),
     background: str = "#E6ECF5",
+    panel_frame: bool = True,
+    panel_facecolor: str = "#F8FAFF",
+    panel_edgecolor: str = "#C6D0E3",
+    panel_pad: float = 0.008,
     heston_color: str = "#6671F4",
     bs_color: str = "#DC5E44",
     save_dir=DEFAULT_FIGURE_DIR,
@@ -515,7 +520,7 @@ def plot_universal_absolute_level_panels(
             raise ValueError(f"Missing computed level columns: {missing}")
 
         for ax in (ax_top, ax_bottom):
-            ax.set_facecolor(background)
+            ax.set_facecolor(panel_facecolor if panel_frame else background)
             ax.grid(True, axis="y", linewidth=0.6, alpha=0.38, color="white")
             for spine in ax.spines.values():
                 spine.set_color("white")
@@ -572,6 +577,29 @@ def plot_universal_absolute_level_panels(
         fontsize=13,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.975))
+
+    if panel_frame:
+        for idx in range(n_panels):
+            metric_row = idx // ncols
+            col = idx % ncols
+            ax_top = axes[metric_row * 2, col]
+            ax_bottom = axes[metric_row * 2 + 1, col]
+            boxes = [ax_top.get_position(), ax_bottom.get_position()]
+            x0 = max(min(box.x0 for box in boxes) - panel_pad, 0.0)
+            y0 = max(min(box.y0 for box in boxes) - panel_pad, 0.0)
+            x1 = min(max(box.x1 for box in boxes) + panel_pad, 1.0)
+            y1 = min(max(box.y1 for box in boxes) + panel_pad, 1.0)
+            panel_rect = Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                transform=fig.transFigure,
+                facecolor=panel_facecolor,
+                edgecolor=panel_edgecolor,
+                linewidth=1.0,
+                zorder=-1,
+            )
+            fig.patches.append(panel_rect)
 
     if filename is None:
         bucket_name = str(bucket).replace("/", "-")
