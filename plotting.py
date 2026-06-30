@@ -426,6 +426,165 @@ def plot_universal_quadrant_success(
     return fig, diff_df
 
 
+def plot_universal_absolute_level_panels(
+    aligned_summary,
+    oos_metric: str = "test_bsiv_median",
+    selection_cols: Optional[list[str]] = None,
+    selection_names: Optional[dict[str, str]] = None,
+    bucket: str = "all",
+    group_cols: Optional[list[str]] = None,
+    theory_col: str = "theory",
+    heston_name: str = "HESTON",
+    bs_name: str = "BS",
+    ncols: int = 2,
+    figsize: tuple[float, float] = (15.0, 18.0),
+    background: str = "#E6ECF5",
+    heston_color: str = "#6671F4",
+    bs_color: str = "#DC5E44",
+    save_dir=DEFAULT_FIGURE_DIR,
+    filename: Optional[str] = None,
+    show: bool = True,
+    dpi: int = 300,
+):
+    selection_names = (
+        DEFAULT_SELECTION_CRITERION_NAMES
+        if selection_names is None
+        else selection_names
+    )
+    if selection_cols is None:
+        selection_cols = list(selection_names.keys())
+    if len(selection_cols) == 0:
+        raise ValueError("selection_cols must contain at least one column.")
+
+    value_cols = [*selection_cols, oos_metric]
+    level_df = _heston_minus_bs_wide(
+        aligned_summary,
+        value_cols=value_cols,
+        bucket=bucket,
+        group_cols=group_cols,
+        theory_col=theory_col,
+        heston_name=heston_name,
+        bs_name=bs_name,
+    )
+
+    x_col = "holdout_seed" if "holdout_seed" in level_df.columns else None
+    if x_col is None and "seed" in level_df.columns:
+        x_col = "seed"
+    if x_col is None:
+        x = np.arange(len(level_df))
+        x_label = "Index"
+    else:
+        x = level_df[x_col].to_numpy()
+        x_label = x_col
+
+    n_panels = len(selection_cols)
+    metric_rows = int(np.ceil(n_panels / ncols))
+    physical_rows = metric_rows * 2
+    height_ratios = [1.0, 0.82] * metric_rows
+    fig, axes = plt.subplots(
+        physical_rows,
+        ncols,
+        figsize=figsize,
+        squeeze=False,
+        gridspec_kw={"height_ratios": height_ratios},
+    )
+    fig.patch.set_facecolor(background)
+
+    for idx, selection_col in enumerate(selection_cols):
+        metric_row = idx // ncols
+        col = idx % ncols
+        ax_top = axes[metric_row * 2, col]
+        ax_bottom = axes[metric_row * 2 + 1, col]
+
+        label = selection_names.get(selection_col, selection_col)
+        top_heston_col = f"{selection_col}_heston"
+        top_bs_col = f"{selection_col}_bs"
+        bottom_heston_col = f"{oos_metric}_heston"
+        bottom_bs_col = f"{oos_metric}_bs"
+        missing = [
+            col_name
+            for col_name in [
+                top_heston_col,
+                top_bs_col,
+                bottom_heston_col,
+                bottom_bs_col,
+            ]
+            if col_name not in level_df.columns
+        ]
+        if missing:
+            raise ValueError(f"Missing computed level columns: {missing}")
+
+        for ax in (ax_top, ax_bottom):
+            ax.set_facecolor(background)
+            ax.grid(True, axis="y", linewidth=0.6, alpha=0.38, color="white")
+            for spine in ax.spines.values():
+                spine.set_color("white")
+
+        ax_top.plot(
+            x,
+            level_df[top_heston_col].to_numpy(dtype=float),
+            marker="o",
+            linewidth=1.8,
+            color=heston_color,
+            label=heston_name,
+        )
+        ax_top.plot(
+            x,
+            level_df[top_bs_col].to_numpy(dtype=float),
+            marker="s",
+            linewidth=1.8,
+            color=bs_color,
+            label=bs_name,
+        )
+        ax_top.set_title(label, fontsize=11)
+        ax_top.set_ylabel(label)
+        ax_top.tick_params(axis="x", labelbottom=False)
+        ax_top.legend(frameon=False, fontsize=8, loc="best")
+
+        ax_bottom.plot(
+            x,
+            level_df[bottom_heston_col].to_numpy(dtype=float),
+            marker="o",
+            linewidth=1.7,
+            color=heston_color,
+            label=heston_name,
+        )
+        ax_bottom.plot(
+            x,
+            level_df[bottom_bs_col].to_numpy(dtype=float),
+            marker="s",
+            linewidth=1.7,
+            color=bs_color,
+            label=bs_name,
+        )
+        ax_bottom.set_xlabel(x_label)
+        ax_bottom.set_ylabel(oos_metric)
+        ax_bottom.legend(frameon=False, fontsize=8, loc="best")
+
+    for idx in range(n_panels, metric_rows * ncols):
+        metric_row = idx // ncols
+        col = idx % ncols
+        axes[metric_row * 2, col].set_visible(False)
+        axes[metric_row * 2 + 1, col].set_visible(False)
+
+    fig.suptitle(
+        f"Absolute levels by seed, bucket={bucket}, OOS metric={oos_metric}",
+        fontsize=13,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.975))
+
+    if filename is None:
+        bucket_name = str(bucket).replace("/", "-")
+        filename = f"universal_absolute_levels_{bucket_name}_{oos_metric}.png"
+    if save_dir is not None:
+        save_dir = _ensure_dir(save_dir)
+        _save_and_maybe_show(fig, save_dir / filename, show=show, dpi=dpi)
+    elif show:
+        plt.show()
+
+    return fig, level_df
+
+
 def plot_bounds(
     results_df: pd.DataFrame,
     save_dir=DEFAULT_FIGURE_DIR,
