@@ -24,6 +24,7 @@ from finetune import (
     weighted_mae_numpy,
 )
 from pactran_blr_score import align_pactran_finetune, score_checkpoint_blr_subsamples
+from pactran_blr_logme_score import score_checkpoint_blr_subsamples_logme
 
 
 DELTA_BINS = [round(x, 1) for x in np.linspace(-1.0, 0.0, 11)]
@@ -891,6 +892,13 @@ def _run_seed_pactran(
     n_subsamples: int,
     subsample_seed: int,
     device: Optional[str] = None,
+    optimize_scales: bool = False,
+    scale_opt_max_iter: int = 100,
+    scale_opt_tol: float = 1e-6,
+    min_sigma2: float = 1e-10,
+    max_sigma2: float = 1e4,
+    min_sigma_pi2: float = 1e-10,
+    max_sigma_pi2: float = 1e4,
 ) -> pd.DataFrame:
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -904,21 +912,44 @@ def _run_seed_pactran(
         train_val = split["train_val"]
         for spec in checkpoint_specs:
             try:
-                row, posterior = score_checkpoint_blr_subsamples(
-                    spec=spec,
-                    target_dataset=train_val,
-                    target_col=target_col,
-                    date_before=None,
-                    only_put=False,
-                    sigma2=sigma2,
-                    sigma_pi2=sigma_pi2,
-                    prior_center=prior_center,
-                    device=device,
-                    subsample_size=subsample_size,
-                    subsample_frac=subsample_frac,
-                    n_subsamples=n_subsamples,
-                    subsample_seed=subsample_seed,
-                )
+                if optimize_scales:
+                    row, posterior = score_checkpoint_blr_subsamples_logme(
+                        spec=spec,
+                        target_dataset=train_val,
+                        target_col=target_col,
+                        date_before=None,
+                        only_put=False,
+                        sigma2=sigma2,
+                        sigma_pi2=sigma_pi2,
+                        prior_center=prior_center,
+                        device=device,
+                        subsample_size=subsample_size,
+                        subsample_frac=subsample_frac,
+                        n_subsamples=n_subsamples,
+                        subsample_seed=subsample_seed,
+                        optimization_max_iter=scale_opt_max_iter,
+                        optimization_tol=scale_opt_tol,
+                        min_sigma2=min_sigma2,
+                        max_sigma2=max_sigma2,
+                        min_sigma_pi2=min_sigma_pi2,
+                        max_sigma_pi2=max_sigma_pi2,
+                    )
+                else:
+                    row, posterior = score_checkpoint_blr_subsamples(
+                        spec=spec,
+                        target_dataset=train_val,
+                        target_col=target_col,
+                        date_before=None,
+                        only_put=False,
+                        sigma2=sigma2,
+                        sigma_pi2=sigma_pi2,
+                        prior_center=prior_center,
+                        device=device,
+                        subsample_size=subsample_size,
+                        subsample_frac=subsample_frac,
+                        n_subsamples=n_subsamples,
+                        subsample_seed=subsample_seed,
+                    )
                 theory = row.pop("name")
                 row.update(metadata)
                 row["theory"] = theory
@@ -985,6 +1016,13 @@ def _run_seed_universal_pactran(
     n_subsamples: int,
     subsample_seed: int,
     device: Optional[str] = None,
+    optimize_scales: bool = False,
+    scale_opt_max_iter: int = 100,
+    scale_opt_tol: float = 1e-6,
+    min_sigma2: float = 1e-10,
+    max_sigma2: float = 1e4,
+    min_sigma_pi2: float = 1e-10,
+    max_sigma_pi2: float = 1e4,
 ) -> pd.DataFrame:
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -997,21 +1035,44 @@ def _run_seed_universal_pactran(
     rows = []
     for spec in checkpoint_specs:
         try:
-            row, posterior = score_checkpoint_blr_subsamples(
-                spec=spec,
-                target_dataset=train_val,
-                target_col=target_col,
-                date_before=None,
-                only_put=False,
-                sigma2=sigma2,
-                sigma_pi2=sigma_pi2,
-                prior_center=prior_center,
-                device=device,
-                subsample_size=subsample_size,
-                subsample_frac=subsample_frac,
-                n_subsamples=n_subsamples,
-                subsample_seed=subsample_seed,
-            )
+            if optimize_scales:
+                row, posterior = score_checkpoint_blr_subsamples_logme(
+                    spec=spec,
+                    target_dataset=train_val,
+                    target_col=target_col,
+                    date_before=None,
+                    only_put=False,
+                    sigma2=sigma2,
+                    sigma_pi2=sigma_pi2,
+                    prior_center=prior_center,
+                    device=device,
+                    subsample_size=subsample_size,
+                    subsample_frac=subsample_frac,
+                    n_subsamples=n_subsamples,
+                    subsample_seed=subsample_seed,
+                    optimization_max_iter=scale_opt_max_iter,
+                    optimization_tol=scale_opt_tol,
+                    min_sigma2=min_sigma2,
+                    max_sigma2=max_sigma2,
+                    min_sigma_pi2=min_sigma_pi2,
+                    max_sigma_pi2=max_sigma_pi2,
+                )
+            else:
+                row, posterior = score_checkpoint_blr_subsamples(
+                    spec=spec,
+                    target_dataset=train_val,
+                    target_col=target_col,
+                    date_before=None,
+                    only_put=False,
+                    sigma2=sigma2,
+                    sigma_pi2=sigma_pi2,
+                    prior_center=prior_center,
+                    device=device,
+                    subsample_size=subsample_size,
+                    subsample_frac=subsample_frac,
+                    n_subsamples=n_subsamples,
+                    subsample_seed=subsample_seed,
+                )
             theory = row.pop("name")
             row.update(metadata)
             row["theory"] = theory
@@ -1093,6 +1154,13 @@ def run_repeated_random_holdout_experiments(
     pactran_subsample_frac: Optional[float] = None,
     pactran_n_subsamples: int = 5,
     pactran_subsample_seed: int = 123,
+    pactran_optimize_scales: bool = False,
+    pactran_scale_opt_max_iter: int = 100,
+    pactran_scale_opt_tol: float = 1e-6,
+    pactran_min_sigma2: float = 1e-10,
+    pactran_max_sigma2: float = 1e4,
+    pactran_min_sigma_pi2: float = 1e-10,
+    pactran_max_sigma_pi2: float = 1e4,
     maturity_bins: Optional[list[float]] = None,
     maturity_labels: Optional[list[str]] = None,
 ) -> pd.DataFrame:
@@ -1184,6 +1252,13 @@ def run_repeated_random_holdout_experiments(
                 subsample_frac=pactran_subsample_frac,
                 n_subsamples=pactran_n_subsamples,
                 subsample_seed=pactran_subsample_seed,
+                optimize_scales=pactran_optimize_scales,
+                scale_opt_max_iter=pactran_scale_opt_max_iter,
+                scale_opt_tol=pactran_scale_opt_tol,
+                min_sigma2=pactran_min_sigma2,
+                max_sigma2=pactran_max_sigma2,
+                min_sigma_pi2=pactran_min_sigma_pi2,
+                max_sigma_pi2=pactran_max_sigma_pi2,
             )
         else:
             pactran_results = pd.read_csv(pactran_csv)
@@ -1230,6 +1305,13 @@ def run_repeated_random_holdout_universal_experiments(
     pactran_subsample_frac: Optional[float] = None,
     pactran_n_subsamples: int = 5,
     pactran_subsample_seed: int = 123,
+    pactran_optimize_scales: bool = False,
+    pactran_scale_opt_max_iter: int = 100,
+    pactran_scale_opt_tol: float = 1e-6,
+    pactran_min_sigma2: float = 1e-10,
+    pactran_max_sigma2: float = 1e4,
+    pactran_min_sigma_pi2: float = 1e-10,
+    pactran_max_sigma_pi2: float = 1e4,
     max_holdout_retries: int = 1000,
     holdout_split_date: Optional[str] = None,
     maturity_bins: Optional[list[float]] = None,
@@ -1347,6 +1429,13 @@ def run_repeated_random_holdout_universal_experiments(
                 subsample_frac=pactran_subsample_frac,
                 n_subsamples=pactran_n_subsamples,
                 subsample_seed=pactran_subsample_seed,
+                optimize_scales=pactran_optimize_scales,
+                scale_opt_max_iter=pactran_scale_opt_max_iter,
+                scale_opt_tol=pactran_scale_opt_tol,
+                min_sigma2=pactran_min_sigma2,
+                max_sigma2=pactran_max_sigma2,
+                min_sigma_pi2=pactran_min_sigma_pi2,
+                max_sigma_pi2=pactran_max_sigma_pi2,
             )
         else:
             pactran_results = pd.read_csv(pactran_csv)

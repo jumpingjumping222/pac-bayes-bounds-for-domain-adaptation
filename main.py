@@ -11,6 +11,10 @@ from pactran_blr_score import (
     run_pactran_blr_scores,
     run_rolling_pactran_blr_scores,
 )
+from pactran_blr_logme_score import (
+    run_pactran_blr_logme_scores,
+    run_rolling_pactran_blr_logme_scores,
+)
 from pretrain import run_all_theory_pretrains
 from repeated_random_holdout import (
     run_repeated_random_holdout_experiments,
@@ -73,6 +77,18 @@ PACTRAN_SUBSAMPLE_SIZE = 100_000
 PACTRAN_SUBSAMPLE_FRAC = 1
 PACTRAN_N_SUBSAMPLES = 1
 PACTRAN_SUBSAMPLE_SEED = 123
+
+# If True, replace fixed (sigma2, sigma_pi2) scoring with LogME-style
+# empirical-Bayes optimization of alpha=1/sigma_pi2 and beta=1/sigma2.
+# PACTRAN_SIGMA2 and PACTRAN_SIGMA_PI2 are then used only as initial values.
+PACTRAN_OPTIMIZE_SCALES = False
+PACTRAN_SCALE_OPTIMIZATION = "logme_fixed_point"
+PACTRAN_SCALE_OPT_MAX_ITER = 100
+PACTRAN_SCALE_OPT_TOL = 1e-6
+PACTRAN_MIN_SIGMA2 = 1e-10
+PACTRAN_MAX_SIGMA2 = 1e4
+PACTRAN_MIN_SIGMA_PI2 = 1e-10
+PACTRAN_MAX_SIGMA_PI2 = 1e4
 
 # ========= Output setting
 OUTPUT_ROOT = Path("outputs")
@@ -139,6 +155,14 @@ def save_config() -> None:
         "pactran_subsample_frac": PACTRAN_SUBSAMPLE_FRAC,
         "pactran_n_subsamples": PACTRAN_N_SUBSAMPLES,
         "pactran_subsample_seed": PACTRAN_SUBSAMPLE_SEED,
+        "pactran_optimize_scales": PACTRAN_OPTIMIZE_SCALES,
+        "pactran_scale_optimization": PACTRAN_SCALE_OPTIMIZATION,
+        "pactran_scale_opt_max_iter": PACTRAN_SCALE_OPT_MAX_ITER,
+        "pactran_scale_opt_tol": PACTRAN_SCALE_OPT_TOL,
+        "pactran_min_sigma2": PACTRAN_MIN_SIGMA2,
+        "pactran_max_sigma2": PACTRAN_MAX_SIGMA2,
+        "pactran_min_sigma_pi2": PACTRAN_MIN_SIGMA_PI2,
+        "pactran_max_sigma_pi2": PACTRAN_MAX_SIGMA_PI2,
         "output_root": OUTPUT_ROOT,
         "experiment_name": EXPERIMENT_NAME,
         "experiment_dir": EXPERIMENT_DIR,
@@ -195,25 +219,52 @@ def run_fixed_oos(heston_dataset, specs):
         )
 
     if RUN_PACTRAN_SCORE:
-        pactran_results = run_pactran_blr_scores(
-            target_dataset=heston_dataset,
-            checkpoint_specs=specs,
-            output_csv=PACTRAN_OUTPUT_CSV,
-            target_col=PACTRAN_TARGET_COL,
-            date_before=FIXED_TEST_START_DATE,
-            only_put=True,
-            sigma2=PACTRAN_SIGMA2,
-            sigma_pi2=PACTRAN_SIGMA_PI2,
-            prior_center=PACTRAN_PRIOR_CENTER,
-            posterior_dir=PACTRAN_POSTERIOR_DIR,
-            subsample_size=PACTRAN_SUBSAMPLE_SIZE,
-            subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
-            n_subsamples=PACTRAN_N_SUBSAMPLES,
-            subsample_seed=PACTRAN_SUBSAMPLE_SEED,
-            use_maturity_buckets=USE_MATURITY_BUCKETS,
-            maturity_bins=MATURITY_BINS,
-            maturity_labels=MATURITY_LABELS,
-        )
+        if PACTRAN_OPTIMIZE_SCALES:
+            pactran_results = run_pactran_blr_logme_scores(
+                target_dataset=heston_dataset,
+                checkpoint_specs=specs,
+                output_csv=PACTRAN_OUTPUT_CSV,
+                target_col=PACTRAN_TARGET_COL,
+                date_before=FIXED_TEST_START_DATE,
+                only_put=True,
+                sigma2=PACTRAN_SIGMA2,
+                sigma_pi2=PACTRAN_SIGMA_PI2,
+                prior_center=PACTRAN_PRIOR_CENTER,
+                posterior_dir=PACTRAN_POSTERIOR_DIR,
+                subsample_size=PACTRAN_SUBSAMPLE_SIZE,
+                subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
+                n_subsamples=PACTRAN_N_SUBSAMPLES,
+                subsample_seed=PACTRAN_SUBSAMPLE_SEED,
+                use_maturity_buckets=USE_MATURITY_BUCKETS,
+                maturity_bins=MATURITY_BINS,
+                maturity_labels=MATURITY_LABELS,
+                optimization_max_iter=PACTRAN_SCALE_OPT_MAX_ITER,
+                optimization_tol=PACTRAN_SCALE_OPT_TOL,
+                min_sigma2=PACTRAN_MIN_SIGMA2,
+                max_sigma2=PACTRAN_MAX_SIGMA2,
+                min_sigma_pi2=PACTRAN_MIN_SIGMA_PI2,
+                max_sigma_pi2=PACTRAN_MAX_SIGMA_PI2,
+            )
+        else:
+            pactran_results = run_pactran_blr_scores(
+                target_dataset=heston_dataset,
+                checkpoint_specs=specs,
+                output_csv=PACTRAN_OUTPUT_CSV,
+                target_col=PACTRAN_TARGET_COL,
+                date_before=FIXED_TEST_START_DATE,
+                only_put=True,
+                sigma2=PACTRAN_SIGMA2,
+                sigma_pi2=PACTRAN_SIGMA_PI2,
+                prior_center=PACTRAN_PRIOR_CENTER,
+                posterior_dir=PACTRAN_POSTERIOR_DIR,
+                subsample_size=PACTRAN_SUBSAMPLE_SIZE,
+                subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
+                n_subsamples=PACTRAN_N_SUBSAMPLES,
+                subsample_seed=PACTRAN_SUBSAMPLE_SEED,
+                use_maturity_buckets=USE_MATURITY_BUCKETS,
+                maturity_bins=MATURITY_BINS,
+                maturity_labels=MATURITY_LABELS,
+            )
 
     if finetune_results is None:
         finetune_results = pd.read_csv(FINETUNE_OUTPUT_DIR / "results.csv")
@@ -254,27 +305,56 @@ def run_rolling_oos(heston_dataset, specs):
         )
 
     if RUN_PACTRAN_SCORE:
-        pactran_results = run_rolling_pactran_blr_scores(
-            target_dataset=heston_dataset,
-            checkpoint_specs=specs,
-            output_csv=PACTRAN_OUTPUT_CSV,
-            target_col=PACTRAN_TARGET_COL,
-            train_days=ROLLING_TRAIN_DAYS,
-            test_days=ROLLING_TEST_DAYS,
-            step_days=ROLLING_STEP_DAYS,
-            only_put=True,
-            use_maturity_buckets=USE_MATURITY_BUCKETS,
-            maturity_bins=MATURITY_BINS,
-            maturity_labels=MATURITY_LABELS,
-            sigma2=PACTRAN_SIGMA2,
-            sigma_pi2=PACTRAN_SIGMA_PI2,
-            prior_center=PACTRAN_PRIOR_CENTER,
-            posterior_dir=PACTRAN_POSTERIOR_DIR,
-            subsample_size=PACTRAN_SUBSAMPLE_SIZE,
-            subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
-            n_subsamples=PACTRAN_N_SUBSAMPLES,
-            subsample_seed=PACTRAN_SUBSAMPLE_SEED,
-        )
+        if PACTRAN_OPTIMIZE_SCALES:
+            pactran_results = run_rolling_pactran_blr_logme_scores(
+                target_dataset=heston_dataset,
+                checkpoint_specs=specs,
+                output_csv=PACTRAN_OUTPUT_CSV,
+                target_col=PACTRAN_TARGET_COL,
+                train_days=ROLLING_TRAIN_DAYS,
+                test_days=ROLLING_TEST_DAYS,
+                step_days=ROLLING_STEP_DAYS,
+                only_put=True,
+                use_maturity_buckets=USE_MATURITY_BUCKETS,
+                maturity_bins=MATURITY_BINS,
+                maturity_labels=MATURITY_LABELS,
+                sigma2=PACTRAN_SIGMA2,
+                sigma_pi2=PACTRAN_SIGMA_PI2,
+                prior_center=PACTRAN_PRIOR_CENTER,
+                posterior_dir=PACTRAN_POSTERIOR_DIR,
+                subsample_size=PACTRAN_SUBSAMPLE_SIZE,
+                subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
+                n_subsamples=PACTRAN_N_SUBSAMPLES,
+                subsample_seed=PACTRAN_SUBSAMPLE_SEED,
+                optimization_max_iter=PACTRAN_SCALE_OPT_MAX_ITER,
+                optimization_tol=PACTRAN_SCALE_OPT_TOL,
+                min_sigma2=PACTRAN_MIN_SIGMA2,
+                max_sigma2=PACTRAN_MAX_SIGMA2,
+                min_sigma_pi2=PACTRAN_MIN_SIGMA_PI2,
+                max_sigma_pi2=PACTRAN_MAX_SIGMA_PI2,
+            )
+        else:
+            pactran_results = run_rolling_pactran_blr_scores(
+                target_dataset=heston_dataset,
+                checkpoint_specs=specs,
+                output_csv=PACTRAN_OUTPUT_CSV,
+                target_col=PACTRAN_TARGET_COL,
+                train_days=ROLLING_TRAIN_DAYS,
+                test_days=ROLLING_TEST_DAYS,
+                step_days=ROLLING_STEP_DAYS,
+                only_put=True,
+                use_maturity_buckets=USE_MATURITY_BUCKETS,
+                maturity_bins=MATURITY_BINS,
+                maturity_labels=MATURITY_LABELS,
+                sigma2=PACTRAN_SIGMA2,
+                sigma_pi2=PACTRAN_SIGMA_PI2,
+                prior_center=PACTRAN_PRIOR_CENTER,
+                posterior_dir=PACTRAN_POSTERIOR_DIR,
+                subsample_size=PACTRAN_SUBSAMPLE_SIZE,
+                subsample_frac=PACTRAN_SUBSAMPLE_FRAC,
+                n_subsamples=PACTRAN_N_SUBSAMPLES,
+                subsample_seed=PACTRAN_SUBSAMPLE_SEED,
+            )
 
     if finetune_results is None:
         finetune_results = pd.read_csv(FINETUNE_OUTPUT_DIR / "rolling_results.csv")
@@ -315,6 +395,13 @@ def run_repeated_random_holdout_oos(heston_dataset, specs):
         "pactran_subsample_frac": PACTRAN_SUBSAMPLE_FRAC,
         "pactran_n_subsamples": PACTRAN_N_SUBSAMPLES,
         "pactran_subsample_seed": PACTRAN_SUBSAMPLE_SEED,
+        "pactran_optimize_scales": PACTRAN_OPTIMIZE_SCALES,
+        "pactran_scale_opt_max_iter": PACTRAN_SCALE_OPT_MAX_ITER,
+        "pactran_scale_opt_tol": PACTRAN_SCALE_OPT_TOL,
+        "pactran_min_sigma2": PACTRAN_MIN_SIGMA2,
+        "pactran_max_sigma2": PACTRAN_MAX_SIGMA2,
+        "pactran_min_sigma_pi2": PACTRAN_MIN_SIGMA_PI2,
+        "pactran_max_sigma_pi2": PACTRAN_MAX_SIGMA_PI2,
         "maturity_bins": MATURITY_BINS,
         "maturity_labels": MATURITY_LABELS,
     }
